@@ -1,1 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MSTV Player</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #111; color: #eee; margin: 0; display: flex; flex-direction: column; align-items: center; }
+  #player-container { width: 80vw; max-width: 720px; margin-top: 40px; }
+  video { width: 100%; height: auto; background: black; }
+  #info { margin-top: 10px; font-size: 1.2em; }
+</style>
+</head>
+<body>
+
+<h1>MSTV Sync Player</h1>
+<div id="player-container">
+  <video id="videoPlayer" controls></video>
+  <div id="info"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+<script>
+  const { DateTime } = luxon;
+  const player = document.getElementById('videoPlayer');
+  const info = document.getElementById('info');
+  let playlist = null;
+  let currentVideoIndex = -1;
+  let timezone = "Australia/Sydney"; // Default, will override from JSON
+
+  // Fetch playlist JSON
+  async function loadPlaylist() {
+    try {
+      const resp = await fetch('sync-ch1.json');
+      playlist = await resp.json();
+      timezone = playlist.timezone || timezone;
+      scheduleVideo();
+      setInterval(scheduleVideo, 5000); // check every 5 seconds to sync video
+    } catch (err) {
+      info.textContent = "Failed to load playlist JSON.";
+      console.error(err);
+    }
+  }
+
+  function scheduleVideo() {
+    if (!playlist) return;
+    const now = DateTime.now().setZone(timezone);
+    
+    // Find the video whose start <= now < end
+    let foundIndex = playlist.videos.findIndex(v => {
+      const start = DateTime.fromISO(v.start, { zone: timezone });
+      const end = DateTime.fromISO(v.end, { zone: timezone });
+      return now >= start && now < end;
+    });
+
+    if (foundIndex === -1) {
+      // No video playing now
+      player.pause();
+      player.src = "";
+      info.textContent = "No video playing at the moment.";
+      currentVideoIndex = -1;
+      return;
+    }
+
+    if (foundIndex !== currentVideoIndex) {
+      // Switch to new video
+      currentVideoIndex = foundIndex;
+      const video = playlist.videos[foundIndex];
+      player.src = video.url;
+      info.textContent = `Playing: ${video.title} (${video.start} - ${video.end}) [Timezone: ${timezone}]`;
+      
+      // Calculate seek position based on elapsed time
+      const start = DateTime.fromISO(video.start, { zone: timezone });
+      const elapsedSeconds = now.diff(start, 'seconds').seconds;
+      
+      player.currentTime = elapsedSeconds;
+      player.play().catch(e => console.log("Autoplay prevented or error:", e));
+    }
+  }
+
+  // Listen for video end or current time > scheduled end and move to next video
+  player.addEventListener('timeupdate', () => {
+    if (currentVideoIndex === -1) return;
+    const video = playlist.videos[currentVideoIndex];
+    const end = DateTime.fromISO(video.end, { zone: timezone });
+    const now = DateTime.now().setZone(timezone);
+    if (now >= end) {
+      scheduleVideo(); // switch to next video based on current time
+    }
+  });
+
+  loadPlaylist();
+</script>
+
+</body>
+</html>
 
